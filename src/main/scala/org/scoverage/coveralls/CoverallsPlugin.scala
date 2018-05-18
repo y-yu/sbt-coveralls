@@ -9,6 +9,10 @@ import sbt._
 import scala.io.Source
 import java.io.File
 
+import scala.concurrent.duration.Duration
+import scala.concurrent.{Await, Future}
+import scala.concurrent.ExecutionContext.Implicits.global
+
 object Imports {
   object CoverallsKeys {
     val coverallsFile = SettingKey[File]("coverallsFile")
@@ -87,17 +91,22 @@ object CoverallsPlugin extends AutoPlugin {
       new GitClient(repoRootDirectory)(log)
     )
 
-    writer.start()
-
     // include all of the sources (from all modules)
     val allSources = sourceDirectories.all(aggregateFilter).value.flatten.filter(_.isDirectory()).distinct
 
     val reader = new CoberturaMultiSourceReader(coberturaFile.value, allSources, sourcesEnc)
-    reader.sourceFilenames
-          .map(reader.reportForSource(_))
-          .foreach(writer.addSourceFile(_))
+    val reportForSources = Future.sequence(reader.sourceFilenames.map(f => Future(reader.reportForSource(f))))
 
-    writer.end()
+    Await.result(
+      for {
+        src <- reportForSources
+        js <- Future.sequence(src.map(writer.addSourceFile))
+        j <- writer.concatTempJson(js.toSeq)
+      } yield {
+        writer.makeCoverallsFile(j)
+      },
+      Duration.Inf
+    )
 
     val res = coverallsClient.postFile(coverallsFile.value)
     val failBuildOnError = coverallsFailBuildOnError.value

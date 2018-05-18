@@ -5,6 +5,8 @@ import scala.io.Source
 import scala.language.postfixOps
 import java.io.File
 
+import scala.concurrent.Future
+
 class CoberturaMultiSourceReader(coberturaFile: File, sourceDirs: Seq[File], sourceEncoding: Option[String]) {
 
   require(sourceDirs.nonEmpty, "Given empty sequence of source directories")

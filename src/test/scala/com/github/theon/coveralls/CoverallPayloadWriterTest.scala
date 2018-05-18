@@ -1,12 +1,15 @@
 package com.github.theon.coveralls
 
-import java.io.{ File, StringWriter, Writer }
+import java.io.{File, StringWriter, Writer}
 
 import com.fasterxml.jackson.core.JsonFactory
-import org.scalatest.{ BeforeAndAfterAll, Matchers, WordSpec }
+import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpec}
 import org.scoverage.coveralls.GitClient.GitRevision
-import org.scoverage.coveralls.{ CoverallPayloadWriter, GitClient, SourceFileReport }
+import org.scoverage.coveralls.{CoverallPayloadWriter, GitClient, SourceFileReport}
 import sbt.ConsoleLogger
+
+import scala.concurrent.Await
+import scala.concurrent.duration.Duration
 
 class CoverallPayloadWriterTest extends WordSpec with BeforeAndAfterAll with Matchers {
 
@@ -68,9 +71,10 @@ class CoverallPayloadWriterTest extends WordSpec with BeforeAndAfterAll with Mat
 
         val projectRoot = new File("").getAbsolutePath.replace(File.separator, "/") + "/"
 
-        coverallsW.addSourceFile(
+        Await.result(coverallsW.addSourceFile(
           SourceFileReport(projectRoot + "src/test/resources/TestSourceFile.scala", List(Some(1), None, Some(2)))
-        )
+        ), Duration.Inf)
+
         coverallsW.flush()
 
         w.toString should equal(

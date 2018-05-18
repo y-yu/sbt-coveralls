@@ -2,8 +2,6 @@ import ReleaseTransformations._
 
 name := "sbt-coveralls"
 
-organization := "org.scoverage"
-
 sbtPlugin := true
 
 publishMavenStyle := true
@@ -31,13 +29,6 @@ libraryDependencies ++= Seq (
   "org.scalatest"                     %% "scalatest"                   % "3.0.4"         % "test"
 )
 
-publishTo := Some(
-  if (isSnapshot.value)
-    Opts.resolver.sonatypeSnapshots
-  else
-    Opts.resolver.sonatypeStaging
-)
-
 pomExtra := <url>https://github.com/scoverage/sbt-coveralls</url>
   <licenses>
     <license>
@@ -47,21 +38,9 @@ pomExtra := <url>https://github.com/scoverage/sbt-coveralls</url>
     </license>
   </licenses>
   <scm>
-    <url>git@github.com:scoverage/sbt-coveralls.git</url>
-    <connection>scm:git@github.com:scoverage/sbt-coveralls.git</connection>
+    <url>git@github.com:y-yu/sbt-coveralls.git</url>
+    <connection>scm:git@github.com:y-yu/sbt-coveralls.git</connection>
   </scm>
-  <developers>
-    <developer>
-      <id>theon</id>
-      <name>Ian Forsey</name>
-      <url>http://theon.github.com</url>
-    </developer>
-    <developer>
-      <id>sksamuel</id>
-      <name>Stephen Samuel</name>
-      <url>http://github.com/sksamuel</url>
-    </developer>
-  </developers>
 
 // We redefine the release process so that we use SBT plugin cross building operator (^)
 releaseProcess := Seq[ReleaseStep](

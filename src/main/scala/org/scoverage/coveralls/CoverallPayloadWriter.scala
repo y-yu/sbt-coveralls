@@ -1,11 +1,14 @@
 package org.scoverage.coveralls
 
-import java.io.File
+import java.io._
+import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
-import scala.io.Source
 
-import sbt.Logger
-import com.fasterxml.jackson.core.{ JsonFactory, JsonEncoding }
+import scala.io.Source
+import com.fasterxml.jackson.core.{JsonEncoding, JsonFactory, JsonGenerator}
+
+import scala.concurrent.{Await, Future}
+import scala.concurrent.ExecutionContext.Implicits.global
 
 class CoverallPayloadWriter(
     repoRootDir: File,
@@ -19,15 +22,20 @@ class CoverallPayloadWriter(
   val repoRootDirStr = repoRootDir.getCanonicalPath.replace(File.separator, "/") + "/"
   import gitClient._
 
-  val gen = generator(coverallsFile)
-
   def generator(file: File) = {
     if (!file.getParentFile.exists) file.getParentFile.mkdirs
     val factory = new JsonFactory
     factory.createGenerator(file, JsonEncoding.UTF8)
   }
 
-  def start() {
+  def generator(sw: StringWriter) = {
+    val factory = new JsonFactory
+    factory.createGenerator(sw)
+  }
+
+  def makeCoverallsFile(sourceRawJson: String): Unit = {
+    val gen = generator(coverallsFile)
+
     gen.writeStartObject()
 
     def writeOpt(fieldName: String, holder: Option[String]) =
@@ -38,13 +46,20 @@ class CoverallPayloadWriter(
     writeOpt("service_job_id", travisJobId)
     writeOpt("service_pull_request", sys.env.get("CI_PULL_REQUEST"))
 
-    addGitInfo
+    addGitInfo(gen)
 
     gen.writeFieldName("source_files")
     gen.writeStartArray()
+
+    gen.writeRaw(sourceRawJson)
+
+    gen.writeEndArray()
+    gen.writeEndObject()
+    gen.flush()
+    gen.close()
   }
 
-  private def addGitInfo() {
+  private def addGitInfo(gen: JsonGenerator) {
     gen.writeFieldName("git")
     gen.writeStartObject()
 
@@ -67,14 +82,14 @@ class CoverallPayloadWriter(
     gen.writeFieldName("remotes")
     gen.writeStartArray()
 
-    addGitRemotes(remotes)
+    addGitRemotes(remotes, gen)
 
     gen.writeEndArray()
 
     gen.writeEndObject()
   }
 
-  private def addGitRemotes(remotes: Seq[String]) {
+  private def addGitRemotes(remotes: Seq[String], gen: JsonGenerator) {
     remotes.foreach( remote => {
       gen.writeStartObject()
       gen.writeStringField("name", remote)
@@ -83,14 +98,18 @@ class CoverallPayloadWriter(
     })
   }
 
-  def addSourceFile(report: SourceFileReport) {
+  def addSourceFile(report: SourceFileReport): Future[String] = Future {
+    val md5: MessageDigest = MessageDigest.getInstance("MD5")
 
     // create a name relative to the project root (rather than the module root)
     // this is needed so that coveralls can find the file in git.
     val fileName = report.file.replace(repoRootDirStr, "")
 
-    gen.writeStartObject()
-    gen.writeStringField("name", fileName)
+    val sw = new StringWriter()
+    val tempGen = generator(sw)
+
+    tempGen.writeStartObject()
+    tempGen.writeStringField("name", fileName)
 
     val source = sourceEncoding match {
      case Some(enc) => Source.fromFile(report.file, enc)
@@ -99,34 +118,45 @@ class CoverallPayloadWriter(
     val sourceCode = source.getLines().mkString("\n")
     source.close()
 
-    val sourceDigest = CoverallPayloadWriter.md5.digest(sourceCode.getBytes).map("%02X" format _).mkString
+    val sourceDigest = md5.digest(sourceCode.getBytes).map("%02X" format _).mkString
 
-    gen.writeStringField("source_digest", sourceDigest)
+    tempGen.writeStringField("source_digest", sourceDigest)
 
-    gen.writeFieldName("coverage")
-    gen.writeStartArray()
+    tempGen.writeFieldName("coverage")
+    tempGen.writeStartArray()
     report.lineCoverage.foreach {
-      case Some(x) => gen.writeNumber(x)
-      case _ => gen.writeNull()
+      case Some(x) => tempGen.writeNumber(x)
+      case _ => tempGen.writeNull()
     }
-    gen.writeEndArray()
-    gen.writeEndObject()
+    tempGen.writeEndArray()
+    tempGen.writeEndObject()
+    tempGen.flush()
+    tempGen.close()
+
+    sw.toString
   }
 
-  def end(): Unit = {
-    gen.writeEndArray()
-    gen.writeEndObject()
-    gen.flush()
-    gen.close()
+  def concatTempJson(tempJson: Seq[String]): Future[String] = {
+    def concat(s1: String, s2: String): Future[String] =
+      Future {
+        Seq(s1, s2).mkString(",")
+      }
+
+    def inner(js: Seq[String]): Future[Seq[String]] = js match {
+      case Nil => Future.successful(Nil)
+      case x +: Nil => Future.successful(Seq(x))
+      case x +: y +: xs =>
+        (concat(x, y) zip inner(xs)).map {
+          case (a, b) => a +: b
+        }
+    }
+
+    def build(js: Seq[String]): Future[String] = js match {
+      case Nil => Future.failed(new IllegalStateException())
+      case x +: Nil => Future.successful(x)
+      case xs => inner(xs).flatMap(build)
+    }
+
+    build(tempJson)
   }
-
-  def flush(): Unit = {
-    gen.flush()
-  }
-}
-
-object CoverallPayloadWriter {
-
-  val md5: MessageDigest = MessageDigest.getInstance("MD5")
-
 }
